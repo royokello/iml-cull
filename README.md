@@ -21,22 +21,6 @@ root_directory/
 └── cull_labels.csv # Labels file (created during labeling)
 ```
 
-## Setting Up a Virtual Environment
-
-It's recommended to use a virtual environment to isolate the dependencies for this project:
-
-```bash
-# Create a virtual environment
-python3 -m venv venv
-
-# Activate the virtual environment
-# On macOS/Linux:
-source venv/bin/activate
-
-# When finished, deactivate the virtual environment
-deactivate
-```
-
 ## Installation Requirements
 
 This toolkit requires the following Python libraries:
