@@ -21,6 +21,22 @@ root_directory/
 └── cull_labels.csv # Labels file (created during labeling)
 ```
 
+## Setting Up a Virtual Environment
+
+It's recommended to use a virtual environment to isolate the dependencies for this project:
+
+```bash
+# Create a virtual environment
+python3 -m venv venv
+
+# Activate the virtual environment
+# On macOS/Linux:
+source venv/bin/activate
+
+# When finished, deactivate the virtual environment
+deactivate
+```
+
 ## Installation Requirements
 
 This toolkit requires the following Python libraries:
@@ -52,17 +68,20 @@ python label.py <root_directory>
 Where `<root_directory>` is the path to your project folder containing the `src` directory with your images.
 
 **Features:**
-- Displays images one at a time from the source directory
-- Simple interface with "Cull" and "Keep" buttons
-- Navigation buttons to move between images
+- Simple interface with "Keep" and "Cull" buttons
+- Images displayed at a maximum height of 384px
+- Navigation controls: Previous, Next, and Random buttons
+- Statistics dashboard showing Keep, Cull, Unlabeled, and Total counts
+- Support for removing labels
+- Selective labeling capability
 - Automatically saves labels to `cull_labels.csv`
-- Remembers your previous choices if you restart the application
 
 **Workflow:**
 1. Start the application and navigate to `http://127.0.0.1:5000` in your browser
-2. Review each image and click either "Cull" or "Keep"
-3. Use "Prev" and "Next" buttons to navigate through your image collection
-4. All labels are automatically saved to `cull_labels.csv`
+2. Label images as "Keep" or "Cull" as needed
+3. Navigate through images using Prev, Next, or Random buttons
+4. Use the "Remove Label" button to clear a label if needed
+5. All labels are automatically saved to `cull_labels.csv`
 
 ### 2. Train Module (`train.py`)
 
@@ -118,18 +137,23 @@ Where `<root_directory>` is the same root directory used in previous steps.
 ## Complete Workflow Example
 
 ```
-# Step 1: Create your project structure with images in src/ folder
+
+# Step 1: Install dependencies
+pip install flask torch transformers Pillow
+
+# Step 2: Create your project structure with images in src/ folder
 mkdir -p my_project/src
 cp my_images/* my_project/src/
 
-# Step 2: Manual labeling
+# Step 3: Manual labeling
 python label.py my_project
 
-# Step 3: Train the model
+# Step 4: Train the model
 python train.py my_project
 
-# Step 4: Automatic culling
+# Step 5: Automatic culling
 python cull.py my_project
+
 ```
 
 After these steps, you'll find the images identified for culling in `my_project/src_culled/`.
