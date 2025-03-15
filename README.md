@@ -3,22 +3,27 @@ A simple image culling toolkit with manual labeling built on Flask, AI-assisted 
 
 ## Overview
 
-iml-cull is a toolkit for image culling, which helps photographers and image editors efficiently manage large collections of photos by identifying and separating lower-quality images. The toolkit consists of three primary modules:
+iml-cull is a toolkit for image culling, which helps photographers and image editors efficiently manage large collections of photos by identifying and separating higher-quality images. The toolkit consists of three primary modules:
 
 1. **Label Module** - Manual image labeling interface
 2. **Train Module** - Training a custom Vision Transformer (ViT) model
-3. **Cull Module** - Automated image culling based on the trained model
+3. **Cull Module** - Automated image selection based on the trained model
 
 ## Project Structure
 
-To use iml-cull, create a directory structure as follows:
+iml-cull now supports a unified model approach with multiple albums. Create a directory structure as follows:
 
 ```
-root_directory/
-├── src/            # Source images to process
-├── src_culled/     # Directory for culled images (created automatically)
-├── cull_model/     # Directory for trained model (created automatically)
-└── cull_labels.csv # Labels file (created during labeling)
+root_directory/             # Main root directory
+├── album1/                 # First album folder
+│   ├── src/                # Source images for album1
+│   ├── src_culled/         # Directory for kept images (created automatically)
+│   └── cull_labels.csv     # Labels file for this album (created during labeling)
+├── album2/                 # Second album folder
+│   ├── src/                # Source images for album2
+│   ├── src_culled/         # Directory for kept images (created automatically)
+│   └── cull_labels.csv     # Labels file for this album (created during labeling)
+└── cull_model.pth          # Single trained model (created during training)
 ```
 
 ## Installation Requirements
@@ -46,10 +51,10 @@ The label module provides a simple web interface to manually categorize images a
 
 **Usage:**
 ```
-python label.py <root_directory>
+python label.py <album_directory>
 ```
 
-Where `<root_directory>` is the path to your project folder containing the `src` directory with your images.
+Where `<album_directory>` is the path to your album folder containing the `src` directory with your images.
 
 **Features:**
 - Simple interface with "Keep" and "Cull" buttons
@@ -69,81 +74,111 @@ Where `<root_directory>` is the path to your project folder containing the `src`
 
 ### 2. Train Module (`train.py`)
 
-The train module uses your labeled data to train a Vision Transformer (ViT) model to automatically classify images.
+The train module now supports training a single model using data from multiple albums. It combines all labeled data from various albums to create a unified model.
 
 **Usage:**
 ```
 python train.py <root_directory>
 ```
 
-Where `<root_directory>` is the same root directory used in the labeling step.
+Where `<root_directory>` is the path containing multiple album folders, each with their own labeled data.
+
+**Optional Arguments:**
+```
+--epochs N           Specify number of training epochs (default: 256)
+--batch-size N       Specify batch size (default: 64)
+--learning-rate N    Specify learning rate (default: 1e-4)
+--patience N         Specify early stopping patience (default: 16)
+```
+
+**Example:**
+```
+python train.py my_photos_root --epochs 100 --learning-rate 1e-5
+```
 
 **Features:**
 - Uses Google's ViT (Vision Transformer) architecture
+- Automatically combines data from multiple albums
 - Automatically splits data into training and validation sets
 - Implements early stopping to prevent overfitting
 - Saves the best model based on validation performance
 - Supports both CPU and GPU training (automatically detects CUDA)
+- Default batch size of 64
+- Default learning rate of 1e-4
+- Default patience of 16 epochs for early stopping
+- 25% validation split
 
-**Parameters:**
-- Default training for 20 epochs
-- Batch size of 8
-- Learning rate of 1e-4
-- Patience of 3 epochs for early stopping
-- 20% validation split
-
-The trained model is saved to `<root_directory>/cull_model/best_model.pth`.
+The trained model is saved to `<root_directory>/cull_model.pth` and can be used for all albums within the root directory.
 
 ### 3. Cull Module (`cull.py`)
 
-The cull module uses your trained model to automatically identify and separate images that should be culled.
+The cull module now supports processing multiple albums using a unified model. It automatically identifies and copies images worth keeping to each album's `src_culled` directory.
 
 **Usage:**
 ```
 python cull.py <root_directory>
 ```
 
-Where `<root_directory>` is the same root directory used in previous steps.
+Where `<root_directory>` is the path containing multiple album folders.
+
+**Optional Arguments:**
+```
+--album NAME    Process only a specific album in the root directory
+```
+
+**Example:**
+```
+python cull.py my_photos_root             # Process all albums
+python cull.py my_photos_root --album vacation  # Process only the vacation album
+```
 
 **Features:**
-- Loads the best model from training
-- Processes all images in the `src` directory
-- Copies images predicted as "cull" to the `src_culled` directory
+- Loads a single model for all albums
+- Processes all albums in the root directory
+- For each album, processes all images in the `src` directory
+- Copies images predicted as "keep" to the `src_culled` directory
 - Leaves original files untouched
-- Provides console output for each prediction
+- Provides detailed statistics for each album
+- Shows a comprehensive summary of all processed albums
+
+**Terminology:**
+- "Kept" images are those copied to the `src_culled` directory (model predicts they should be kept)
+- "Culled" images are those not copied (model predicts they should be removed)
 
 **Workflow:**
-1. Train a model using `train.py`
-2. Run `cull.py` to automatically process images
-3. Review the culled images in the `src_culled` directory
+1. Train a unified model using `train.py`
+2. Run `cull.py` to automatically process all albums
+3. Review the kept images in each album's `src_culled` directory
 4. Manually verify the model's decisions
 
 ## Complete Workflow Example
 
 ```
-
 # Step 1: Install dependencies
 pip install flask torch transformers Pillow
 
-# Step 2: Create your project structure with images in src/ folder
-mkdir -p my_project/src
-cp my_images/* my_project/src/
+# Step 2: Create your multi-album structure
+mkdir -p my_photos/wedding/src my_photos/vacation/src my_photos/portrait/src
+# Copy images to each album's src folder
 
-# Step 3: Manual labeling
-python label.py my_project
+# Step 3: Manual labeling (repeat for each album)
+python label.py my_photos/wedding
+python label.py my_photos/vacation
+python label.py my_photos/portrait
 
-# Step 4: Train the model
-python train.py my_project
+# Step 4: Train a unified model
+python train.py my_photos
 
-# Step 5: Automatic culling
-python cull.py my_project
-
+# Step 5: Automatic culling of all albums
+python cull.py my_photos
 ```
 
-After these steps, you'll find the images identified for culling in `my_project/src_culled/`.
+After these steps, each album will have a `src_culled` folder containing the images the model predicted should be kept.
 
 ## Notes
 
-- The training process requires sufficient labeled data for accurate results
+- The training process combines data from multiple albums for better generalization
+- A single model is used across all albums for consistent results
 - GPU acceleration is recommended for faster training but not required
-- The quality of culling predictions depends on the consistency of your manual labeling
+- The quality of predictions depends on the consistency of your manual labeling
+- The default learning rate (1e-4) is optimized for transfer learning with ViT

@@ -129,6 +129,17 @@ def get_label_stats():
         "total": total
     }
 
+def randomize_image_index():
+    """Select a new random image index different from the current one."""
+    global current_index
+    total = len(images)
+    if total > 1:
+        # Ensure we get a different index than the current one
+        new_index = current_index
+        while new_index == current_index:
+            new_index = random.randint(0, total - 1)
+        current_index = new_index
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     global current_index
@@ -141,22 +152,23 @@ def index():
         current_image = images[current_index]
         if action == 'cull':
             labels[current_image] = "cull"
+            # Automatically randomize after labeling
+            randomize_image_index()
         elif action == 'keep':
             labels[current_image] = "keep"
+            # Automatically randomize after labeling
+            randomize_image_index()
         elif action == 'remove':
             if current_image in labels:
                 del labels[current_image]
+            # Automatically randomize after removing label
+            randomize_image_index()
         elif action == 'prev':
             current_index = (current_index - 1) % total
         elif action == 'next':
             current_index = (current_index + 1) % total
         elif action == 'random':
-            if total > 1:
-                # Ensure we get a different index than the current one
-                new_index = current_index
-                while new_index == current_index:
-                    new_index = random.randint(0, total - 1)
-                current_index = new_index
+            randomize_image_index()
         save_labels()
         return redirect(url_for('index'))
 
