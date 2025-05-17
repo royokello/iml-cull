@@ -88,14 +88,16 @@ template = """
 
 # Global state variables.
 root_dir = None
+src_dir_name = 'src'  # Default source directory name
 labels = {}    # {image_name: "cull" or "keep" or None}
 images = []    # list of image filenames
 current_index = 0
 
-def load_data(root):
-    global root_dir, images, labels, current_index
+def load_data(root, source='src'):
+    global root_dir, src_dir_name, images, labels, current_index
     root_dir = root
-    src_dir = os.path.join(root_dir, 'src')
+    src_dir_name = source
+    src_dir = os.path.join(root_dir, src_dir_name)
     images = sorted(os.listdir(src_dir))
     csv_path = os.path.join(root_dir, 'cull_labels.csv')
     if os.path.exists(csv_path):
@@ -145,7 +147,7 @@ def index():
     global current_index
     total = len(images)
     if total == 0:
-        return "No images found in the src directory."
+        return f"No images found in the {src_dir_name} directory."
 
     if request.method == 'POST':
         action = request.form.get('action')
@@ -173,7 +175,7 @@ def index():
         return redirect(url_for('index'))
 
     image_name = images[current_index]
-    image_url = f"/static/{image_name}"  # Serve images from the provided src folder.
+    image_url = f"/static/{image_name}"  # Images are served from the static folder which is set to the source directory
     current_label = labels.get(image_name, None)
     stats = get_label_stats()
     
@@ -184,15 +186,15 @@ def index():
                                  label=current_label,
                                  stats=stats)
 
-def run_label_app(root):
-    load_data(root)
-    # Serve images from the user-specified root/src folder.
-    app.static_folder = os.path.join(root, 'src')
+def run_label_app(root, source='src'):
+    load_data(root, source)
+    app.static_folder = os.path.join(root, source)
     app.run(debug=True)
 
 if __name__ == '__main__':
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python label.py <root_directory>")
-        exit(1)
-    run_label_app(sys.argv[1])
+    import argparse
+    parser = argparse.ArgumentParser(description='Run the image labeling interface')
+    parser.add_argument('--input', required=True, help='Root directory containing the source folder with images')
+    parser.add_argument('--source', default='src', help='Name of the source directory containing images (default: src)')
+    args = parser.parse_args()
+    run_label_app(args.input, args.source)

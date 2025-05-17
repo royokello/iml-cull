@@ -182,3 +182,54 @@ After these steps, each album will have a `src_culled` folder containing the ima
 - GPU acceleration is recommended for faster training but not required
 - The quality of predictions depends on the consistency of your manual labeling
 - The default learning rate (1e-4) is optimized for transfer learning with ViT
+
+## CNN Module
+
+The CNN module provides deep learning functionality for image classification using PyTorch. It uses a pre-trained ResNet-18 model fine-tuned for binary classification of images.
+
+### Model Architecture
+- Base model: ResNet-18 (pretrained on ImageNet)
+- Modified for binary classification (2 output classes)
+- Input size: 224x224 RGB images
+- Output: Binary classification (cull/keep)
+
+### Dataset
+The `IMLCullDataset` class handles the image dataset:
+- Reads image paths and labels from a CSV file
+- Automatically resizes images to 224x224
+- Applies standard ImageNet normalization
+- Labels are mapped as: "cull": 0, "keep": 1
+
+### Training Script
+The training script (`cnn/train.py`) provides the following features:
+
+```bash
+python -m cnn.train --input <data_dir> [options]
+```
+
+Options:
+- `--input`: Root directory containing the source folder with images (required)
+- `--source`: Name of the source directory containing images (default: "src")
+- `--batch_size`: Batch size for training (default: 32)
+- `--epochs`: Number of training epochs (default: 10)
+- `--lr`: Learning rate (default: 1e-4)
+- `--patience`: Number of epochs to wait before early stopping (default: 3)
+
+Features:
+- Uses Adam optimizer
+- Cross-entropy loss for classification
+- Early stopping based on validation accuracy
+- Saves best model weights to `cull_model.pth`
+- Saves training metadata to `cull_model.json`
+- Automatic train/validation split (80/20)
+- GPU support when available
+
+### Model Output
+The training process saves two files:
+1. `cull_model.pth`: The best model weights based on validation accuracy
+2. `cull_model.json`: Training metadata including:
+   - Base model name
+   - Number of epochs trained
+   - Final validation accuracy
+   - Learning rate
+   - Batch size
