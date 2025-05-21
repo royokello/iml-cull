@@ -1,63 +1,60 @@
 import os
 import shutil
 import torch
-from transformers import ViTForImageClassification, ViTImageProcessor
 from PIL import Image
+from torchvision import transforms
+from model import IMLCullModel
+from utils import find_latest_stage
 
-def find_album_directories(root_dir):
-    """Find all album directories inside the root directory that have a src folder"""
-    album_dirs = []
-    
-    # Check if the directory exists
-    if not os.path.exists(root_dir):
-        print(f"Root directory not found: {root_dir}")
-        return album_dirs
-    
-    # List all subdirectories in the root directory
-    for item in os.listdir(root_dir):
-        album_path = os.path.join(root_dir, item)
-        
-        # Check if it's a directory
-        if os.path.isdir(album_path):
-            # Check if it has a src folder
-            src_dir = os.path.join(album_path, 'src')
-            
-            if os.path.exists(src_dir):
-                album_dirs.append(album_path)
-    
-    return album_dirs
+# No need for a separate function, we'll use find_latest_stage directly
 
-def perform_culling(album_dir, model_path=None, device=None):
+def perform_culling(project_dir, stage=None, batch_size=64):
     """
     Uses a trained model to predict which images to cull.
-    The function loads the model and then iterates through images in the 'src' folder.
+    The function loads the model and then processes images in batches from the stage directory.
     If the model predicts the label "keep" (i.e. prediction == 0),
-    the image is copied to the 'src_culled' folder.
+    the image is copied to the next stage directory.
     
     Args:
-        album_dir (str): Album directory containing the 'src' folder with images to process
-        model_path (str): Path to the trained model file. If None, will look for it in the
-                         parent directory of album_dir
-        device (str): Device to run inference on ('cuda' or 'cpu'). Auto-detected if None.
+        project_dir (str): Project directory containing stage folders
+        stage (int): Stage number to process (if None, will use the latest stage)
+        batch_size (int): Number of images to process at once (default: 64)
+        
+    Returns:
+        Tuple of (culled_count, kept_count)
     """
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    # Set device automatically
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    src_dir = os.path.join(album_dir, 'src')
-    dest_dir = os.path.join(album_dir, 'src_culled')
-    
-    # If model_path is not provided, try to find it in the parent directory
-    if model_path is None:
-        # Try to find the model in the parent directory
-        parent_dir = os.path.dirname(os.path.abspath(album_dir))
-        model_path = os.path.join(parent_dir, 'cull_model.pth')
-    
-    if not os.path.exists(src_dir):
-        print(f"Source directory not found: {src_dir}")
+    # Get the stage number if not provided
+    try:
+        if stage is None:
+            stage = find_latest_stage(project_dir)
+            print(f"Using latest stage: {stage}")
+            
+        # Set up the stage directory path
+        stage_dir_path = os.path.join(project_dir, f"stage_{stage}")
+        
+        # Check if the directory exists
+        if not os.path.exists(stage_dir_path):
+            raise ValueError(f"Stage directory not found: {stage_dir_path}")
+    except ValueError as e:
+        print(f"Error: {e}")
         return 0, 0  # Return counts of 0 for culled and kept
     
-    if not os.path.exists(dest_dir):
-        os.makedirs(dest_dir)
+    # Set up the paths
+    src_dir = stage_dir_path
+    next_stage = stage + 1
+    dest_dir = os.path.join(project_dir, f"stage_{next_stage}")
+    model_path = os.path.join(project_dir, f"stage_{stage}_cull_model.pth")
+    
+    # Reset the destination directory if it exists
+    if os.path.exists(dest_dir):
+        print(f"Removing existing stage_{next_stage} directory...")
+        shutil.rmtree(dest_dir)
+    
+    # Create the destination directory
+    os.makedirs(dest_dir)
     
     if not os.path.exists(model_path):
         print(f"No model found at {model_path}. Please ensure the model is trained.")
@@ -66,12 +63,13 @@ def perform_culling(album_dir, model_path=None, device=None):
     print(f"Loading model from {model_path}")
     print(f"Using device: {device}")
     
-    # Load model only once outside the function if processing multiple albums
-    feature_extractor = ViTImageProcessor.from_pretrained('google/vit-base-patch16-224')
-    model = ViTForImageClassification.from_pretrained('google/vit-base-patch16-224', num_labels=2, ignore_mismatched_sizes=True)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.to(device)
-    model.eval()
+    # Load model using IMLCullModel
+    try:
+        model = IMLCullModel.from_pretrained(model_path, device)
+        print("Model loaded successfully.")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return 0, 0
     
     total_images = len(os.listdir(src_dir))
     culled_count = 0
@@ -79,159 +77,90 @@ def perform_culling(album_dir, model_path=None, device=None):
     
     print(f"Processing {total_images} images in {src_dir}...")
     
-    for img_name in os.listdir(src_dir):
-        img_path = os.path.join(src_dir, img_name)
-        try:
-            image = Image.open(img_path).convert("RGB")
-        except Exception as e:
-            print(f"Error loading image {img_name}: {e}")
-            continue
+    # Get all valid image files
+    image_files = [f for f in os.listdir(src_dir) if not os.path.isdir(os.path.join(src_dir, f))]
+    total_images = len(image_files)
+    
+    print(f"Processing {total_images} images in batches of {batch_size}...")
+    
+    # Create the image transform (same as in the model.py and dataset.py)
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    # Process images in batches
+    batch_count = (total_images + batch_size - 1) // batch_size  # Ceiling division
+    
+    for batch_idx in range(batch_count):
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, total_images)
+        current_batch_size = end_idx - start_idx
         
-        inputs = feature_extractor(images=image, return_tensors="pt")
-        pixel_values = inputs['pixel_values'].to(device)
+        print(f"Processing batch {batch_idx+1}/{batch_count} ({current_batch_size} images)...")
         
-        with torch.no_grad():
-            outputs = model(pixel_values=pixel_values)
-        logits = outputs.logits
-        prediction = torch.argmax(logits, dim=1).item()
+        # Prepare the batch
+        batch_tensors = []
+        batch_names = []
         
-        if prediction == 0:
-            dest_path = os.path.join(dest_dir, img_name)
-            shutil.copy(img_path, dest_path)
-            print(f"Keeping {img_name} (copied to src_culled folder).")
-            kept_count += 1
-        else:
-            print(f"Culling {img_name} (not copying to src_culled).")
-            culled_count += 1
-    
-    print(f"\nProcessing complete for {os.path.basename(album_dir)}!")
-    print(f"Total images processed: {total_images}")
-    print(f"Images kept (copied to src_culled): {kept_count}")
-    print(f"Images culled (not copied): {culled_count}")
-    
-    return culled_count, kept_count
-
-def process_root_directory(root_dir, device=None):
-    """
-    Process all album directories in the root directory.
-    
-    Args:
-        root_dir (str): Root directory containing multiple album folders
-        device (str): Device to run inference on ('cuda' or 'cpu'). Auto-detected if None.
-    """
-    # Find all album directories
-    album_dirs = find_album_directories(root_dir)
-    
-    if not album_dirs:
-        print(f"No valid album directories found in {root_dir}")
-        return
-    
-    print(f"Found {len(album_dirs)} album directories to process:")
-    for album_dir in album_dirs:
-        print(f"  - {album_dir}")
-    
-    # Model path in the root directory
-    model_path = os.path.join(root_dir, 'cull_model.pth')
-    
-    if not os.path.exists(model_path):
-        print(f"No model found at {model_path}. Please ensure the model is trained.")
-        return
-    
-    # Set up device
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    
-    print(f"Using device: {device}")
-    
-    # Load model once for all albums
-    print(f"Loading model from {model_path}...")
-    feature_extractor = ViTImageProcessor.from_pretrained('google/vit-base-patch16-224')
-    model = ViTForImageClassification.from_pretrained('google/vit-base-patch16-224', num_labels=2, ignore_mismatched_sizes=True)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.to(device)
-    model.eval()
-    
-    # Process each album
-    total_culled = 0
-    total_kept = 0
-    
-    for album_dir in album_dirs:
-        album_name = os.path.basename(album_dir)
-        print(f"\n{'='*50}")
-        print(f"Processing album: {album_name}")
-        print(f"{'='*50}")
-        
-        # Process this album's images
-        src_dir = os.path.join(album_dir, 'src')
-        dest_dir = os.path.join(album_dir, 'src_culled')
-        
-        if not os.path.exists(src_dir):
-            print(f"Source directory not found: {src_dir}")
-            continue
-        
-        if not os.path.exists(dest_dir):
-            os.makedirs(dest_dir)
-        
-        total_images = len(os.listdir(src_dir))
-        culled_count = 0
-        kept_count = 0
-        
-        print(f"Processing {total_images} images in {src_dir}...")
-        
-        for img_name in os.listdir(src_dir):
+        # Load and preprocess each image in the batch
+        for idx in range(start_idx, end_idx):
+            img_name = image_files[idx]
             img_path = os.path.join(src_dir, img_name)
+            
             try:
                 image = Image.open(img_path).convert("RGB")
+                tensor = transform(image)
+                batch_tensors.append(tensor)
+                batch_names.append(img_name)
             except Exception as e:
-                print(f"Error loading image {img_name}: {e}")
+                print(f"Error processing image {img_name}: {e}")
+                # Skip this image
                 continue
+        
+        if not batch_tensors:  # Skip if all images in batch failed to load
+            continue
+        
+        # Stack tensors into a batch and get predictions
+        batch_tensor = torch.stack(batch_tensors)
+        predictions = model.predict_batch(batch_tensor, device)
+        
+        # Process predictions and copy files accordingly
+        for img_name, prediction in zip(batch_names, predictions):
+            img_path = os.path.join(src_dir, img_name)
             
-            inputs = feature_extractor(images=image, return_tensors="pt")
-            pixel_values = inputs['pixel_values'].to(device)
-            
-            with torch.no_grad():
-                outputs = model(pixel_values=pixel_values)
-            logits = outputs.logits
-            prediction = torch.argmax(logits, dim=1).item()
-            
-            if prediction == 0:
+            if prediction == 0:  # 0 = keep
                 dest_path = os.path.join(dest_dir, img_name)
                 shutil.copy(img_path, dest_path)
                 kept_count += 1
-            else:
+                print(f"Keeping {img_name} (copied to stage_{next_stage} folder).")
+            else:  # 1 = cull
                 culled_count += 1
-        
-        print(f"Album {album_name}: {kept_count} images kept, {culled_count} images culled")
-        total_culled += culled_count
-        total_kept += kept_count
+                print(f"Culling {img_name} (not copying to stage_{next_stage}).")
     
-    # Print summary statistics
-    print(f"\n{'='*50}")
-    print("PROCESSING SUMMARY")
-    print(f"{'='*50}")
-    print(f"Total albums processed: {len(album_dirs)}")
-    print(f"Total images processed: {total_culled + total_kept}")
-    print(f"Total images kept (copied to src_culled): {total_kept}")
-    print(f"Total images culled (not copied): {total_culled}")
-    print(f"Keep rate: {total_kept/(total_culled + total_kept):.2%}")
+    processed_count = kept_count + culled_count
+    print(f"Processed {processed_count}/{total_images} images.")
+    if processed_count < total_images:
+        print(f"Warning: {total_images - processed_count} images could not be processed due to errors.")
+
+    
+    print(f"Culling complete. Kept {kept_count} images, culled {culled_count} images.")
+    print(f"Kept images are saved in stage_{next_stage} directory.")
+    return culled_count, kept_count
 
 if __name__ == '__main__':
-    import sys
     import argparse
     
     parser = argparse.ArgumentParser(description='Use a trained model to predict which images to cull')
-    parser.add_argument('root_directory', type=str, 
-                        help='Path to the root directory containing album folders to process')
-    parser.add_argument('--album', type=str, default=None, 
-                        help='Process only a specific album in the root directory')
+    parser.add_argument('--project', required=True, type=str, 
+                        help='Path to the project directory containing stage folders')
+    parser.add_argument('--stage', type=int, default=None, 
+                        help='Stage number to process (if not provided, will use the latest stage)')
+    parser.add_argument('--batch-size', type=int, default=512, 
+                        help='Number of images to process at once (default: 512)')
     
     args = parser.parse_args()
     
-    if args.album:
-        # Process a specific album
-        album_path = os.path.join(args.root_directory, args.album)
-        model_path = os.path.join(args.root_directory, 'cull_model.pth')
-        perform_culling(album_path, model_path)
-    else:
-        # Process all albums
-        process_root_directory(args.root_directory)
+    # Call the perform_culling function with the provided arguments
+    perform_culling(args.project, args.stage, args.batch_size)

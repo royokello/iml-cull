@@ -1,9 +1,18 @@
-# iml-cull
-A simple image culling toolkit with manual labeling built on Flask, AI-assisted culling recommendations based on Google ViT, and automated image management.
+# IML Cull
+
+IML Cull is a Python library for intelligent machine learning-based image culling that uses a Vision Transformer (ViT) model to learn from labeled samples and automatically select which images to keep or discard from a collection.
+
+## Table of Contents
+- [Installation](#installation)
+- [Project Structure](#project-structure)
+- [Modules](#modules)
+  - [Label Module](#label-module)
+  - [Train Module](#train-module)
+  - [Cull Module](#cull-module)
 
 ## Overview
 
-iml-cull is a toolkit for image culling, which helps photographers and image editors efficiently manage large collections of photos by identifying and separating higher-quality images. The toolkit consists of three primary modules:
+IML Cull helps photographers and image editors efficiently manage large collections of photos by identifying and separating higher-quality images. The toolkit consists of three primary modules:
 
 1. **Label Module** - Manual image labeling interface
 2. **Train Module** - Training a custom Vision Transformer (ViT) model
@@ -11,22 +20,30 @@ iml-cull is a toolkit for image culling, which helps photographers and image edi
 
 ## Project Structure
 
-iml-cull now supports a unified model approach with multiple albums. Create a directory structure as follows:
+The project uses a stage-based workflow structure:
 
 ```
-root_directory/             # Main root directory
-├── album1/                 # First album folder
-│   ├── src/                # Source images for album1
-│   ├── src_culled/         # Directory for kept images (created automatically)
-│   └── cull_labels.csv     # Labels file for this album (created during labeling)
-├── album2/                 # Second album folder
-│   ├── src/                # Source images for album2
-│   ├── src_culled/         # Directory for kept images (created automatically)
-│   └── cull_labels.csv     # Labels file for this album (created during labeling)
-└── cull_model.pth          # Single trained model (created during training)
+project_directory/
+├── stage_1/            # First stage images directory
+│   ├── image1.jpg
+│   ├── image2.png
+│   └── ...
+├── stage_1_cull_labels.csv  # Labels for stage 1 images
+├── stage_1_cull_model.pth   # Trained model for stage 1
+├── stage_1_cull_epoch_log.csv  # Training progress log
+├── stage_2/            # Second stage (output from stage 1 culling)
+│   ├── image1.jpg
+│   └── ...
+└── ...
 ```
 
-## Installation Requirements
+## Installation
+
+```bash
+git clone https://github.com/royokello/iml-cull.git
+cd iml-cull
+pip install -r requirements.txt
+```
 
 This toolkit requires the following Python libraries:
 
@@ -43,193 +60,175 @@ You can install these dependencies using pip:
 pip install flask torch transformers Pillow
 ```
 
-## Module Usage
+## Modules
 
-### 1. Label Module (`label.py`)
+### Label Module
 
-The label module provides a simple web interface to manually categorize images as "keep" or "cull".
+The label module provides a web-based interface for manually labeling images as "keep" or "cull".
 
-**Usage:**
-```
-python label.py <album_directory>
-```
+#### Usage
 
-Where `<album_directory>` is the path to your album folder containing the `src` directory with your images.
-
-**Features:**
-- Simple interface with "Keep" and "Cull" buttons
-- Images displayed at a maximum height of 384px
-- Navigation controls: Previous, Next, and Random buttons
-- Statistics dashboard showing Keep, Cull, Unlabeled, and Total counts
-- Support for removing labels
-- Selective labeling capability
-- Automatically saves labels to `cull_labels.csv`
-
-**Workflow:**
-1. Start the application and navigate to `http://127.0.0.1:5000` in your browser
-2. Label images as "Keep" or "Cull" as needed
-3. Navigate through images using Prev, Next, or Random buttons
-4. Use the "Remove Label" button to clear a label if needed
-5. All labels are automatically saved to `cull_labels.csv`
-
-### 2. Train Module (`train.py`)
-
-The train module now supports training a single model using data from multiple albums. It combines all labeled data from various albums to create a unified model.
-
-**Usage:**
-```
-python train.py <root_directory>
+```bash
+python label.py --project "path/to/project" [--stage STAGE_NUMBER]
 ```
 
-Where `<root_directory>` is the path containing multiple album folders, each with their own labeled data.
+#### Arguments
 
-**Optional Arguments:**
-```
---epochs N           Specify number of training epochs (default: 256)
---batch-size N       Specify batch size (default: 64)
---learning-rate N    Specify learning rate (default: 1e-4)
---patience N         Specify early stopping patience (default: 16)
+| Argument | Description | Default |
+|----------|-------------|--------|
+| `--project` | Root project directory containing images | Required |
+| `--stage` | Stage number to label (e.g., 1, 2, etc.) | Latest stage number |
+
+**Note:** At least one stage directory (e.g., 'stage_1') must exist in the project directory. The module will raise an error if no stage directories are found.
+
+#### Features
+
+- Interactive web interface (runs on port 5000)
+- Simple "Keep" and "Cull" buttons for each image
+- Navigation between images (previous, next, random)
+- Auto-saving of labels to CSV file (`stage_{stage}_cull_labels.csv`)
+- Statistics display showing distribution of labeled images
+
+#### CSV Format
+
+The module generates a CSV file with the following columns:
+- `image_name`: Image filename
+- `label`: String value representing the label ("keep" or "cull")
+
+#### How It Works
+
+1. The label interface loads images from the specified stage directory
+2. Users view each image and decide whether to keep or cull it
+3. Labels are automatically saved to a CSV file as you navigate between images
+4. The system tracks statistics on how many images are labeled in each category
+
+### Train Module
+
+The train module trains a Vision Transformer model to predict whether images should be kept or culled based on labeled samples.
+
+#### Usage
+
+```bash
+python train.py --project "path/to/project" [--stage STAGE_NUMBER] [options]
 ```
 
-**Example:**
-```
-python train.py my_photos_root --epochs 100 --learning-rate 1e-5
-```
+#### Arguments
 
-**Features:**
+| Argument | Description | Default |
+|----------|-------------|--------|
+| `--project` | Root project directory | Required |
+| `--stage` | Stage number to train (e.g., 1, 2, etc.) | Latest stage number |
+| `--epochs` | Number of training epochs | 256 |
+| `--batch-size` | Batch size | 64 |
+| `--learning-rate` | Learning rate | 1e-4 |
+| `--patience` | Early stopping patience in epochs | 8 |
+
+**Note:** At least one stage directory (e.g., 'stage_1') must exist in the project directory. The module will raise an error if no stage directories are found.
+
+#### Features
+
+- Binary classification model architecture (keep/cull)
+- CSV logging with per-epoch metrics for both training and validation
+- Model checkpoint saving based on improvement in validation accuracy
+- Early stopping to prevent overfitting
 - Uses Google's ViT (Vision Transformer) architecture
-- Automatically combines data from multiple albums
-- Automatically splits data into training and validation sets
-- Implements early stopping to prevent overfitting
-- Saves the best model based on validation performance
+- Automatically splits data into training and validation sets (25% validation split)
 - Supports both CPU and GPU training (automatically detects CUDA)
-- Default batch size of 64
-- Default learning rate of 1e-4
-- Default patience of 16 epochs for early stopping
-- 25% validation split
 
-The trained model is saved to `<root_directory>/cull_model.pth` and can be used for all albums within the root directory.
+#### Training Process
 
-### 3. Cull Module (`cull.py`)
+1. Reads labels from `stage_{stage}_cull_labels.csv` file in the specified stage directory
+2. Splits data into training and validation sets based on the specified ratio
+3. Trains the ViT model with a binary classification head
+4. Logs progress to CSV file with columns:
+   - epoch
+   - train_loss
+   - val_loss
+   - val_accuracy
+5. Saves best model as `stage_{stage}_cull_model.pth` when validation accuracy improves
+6. Uses early stopping when no improvement is seen after the specified patience epochs
 
-The cull module now supports processing multiple albums using a unified model. It automatically identifies and copies images worth keeping to each album's `src_culled` directory.
+### Cull Module
 
-**Usage:**
-```
-python cull.py <root_directory>
-```
+The cull module uses a trained model to automatically process and select which images to keep from a specified stage directory.
 
-Where `<root_directory>` is the path containing multiple album folders.
+#### Usage
 
-**Optional Arguments:**
-```
---album NAME    Process only a specific album in the root directory
-```
-
-**Example:**
-```
-python cull.py my_photos_root             # Process all albums
-python cull.py my_photos_root --album vacation  # Process only the vacation album
+```bash
+python cull.py --project "path/to/project" [--stage STAGE_NUMBER]
 ```
 
-**Features:**
-- Loads a single model for all albums
-- Processes all albums in the root directory
-- For each album, processes all images in the `src` directory
-- Copies images predicted as "keep" to the `src_culled` directory
-- Leaves original files untouched
-- Provides detailed statistics for each album
-- Shows a comprehensive summary of all processed albums
+#### Arguments
 
-**Terminology:**
-- "Kept" images are those copied to the `src_culled` directory (model predicts they should be kept)
-- "Culled" images are those not copied (model predicts they should be removed)
+| Argument | Description | Default |
+|----------|-------------|--------|
+| `--project` | Root project directory | Required |
+| `--stage` | Stage number to process | Latest stage number |
 
-**Workflow:**
-1. Train a unified model using `train.py`
-2. Run `cull.py` to automatically process all albums
-3. Review the kept images in each album's `src_culled` directory
-4. Manually verify the model's decisions
+#### Features
 
-## Complete Workflow Example
+- Automatic batch processing of all images in a stage directory
+- Dynamic output directory naming based on stage progression
+- Detailed per-image logging of keep/cull decisions
 
-```
-# Step 1: Install dependencies
-pip install flask torch transformers Pillow
+#### Culling Process
 
-# Step 2: Create your multi-album structure
-mkdir -p my_photos/wedding/src my_photos/vacation/src my_photos/portrait/src
-# Copy images to each album's src folder
+1. Loads trained model from `stage_{stage}_cull_model.pth`
+2. For each image in the stage directory:
+   - Predicts whether the image should be kept (0) or culled (1)
+   - If the prediction is "keep" (0), copies the image to the next stage directory
+   - If the prediction is "cull" (1), the image is not copied
+3. Creates a new stage directory (`stage_{stage+1}`) containing only the kept images
 
-# Step 3: Manual labeling (repeat for each album)
-python label.py my_photos/wedding
-python label.py my_photos/vacation
-python label.py my_photos/portrait
+**Important Note:** In this project, "culling" refers to the process of selecting images to **remove**, while "keeping" refers to images that should be **preserved**. The next stage folder will contain images predicted as "keep" (prediction=0), not the ones that should be removed (prediction=1).
 
-# Step 4: Train a unified model
-python train.py my_photos
+## Workflow Example
 
-# Step 5: Automatic culling of all albums
-python cull.py my_photos
-```
+1. **Label**: Label images in stage_1 directory
+   ```bash
+   python label.py --project "project_dir" --stage 1
+   ```
 
-After these steps, each album will have a `src_culled` folder containing the images the model predicted should be kept.
+2. **Train**: Train a model using the labeled data
+   ```bash
+   python train.py --project "project_dir" --stage 1 --epochs 50
+   ```
 
-## Notes
+3. **Cull**: Apply the trained model to cull images
+   ```bash
+   python cull.py --project "project_dir" --stage 1
+   ```
+   This will create a stage_2 directory with only the kept images.
 
-- The training process combines data from multiple albums for better generalization
-- A single model is used across all albums for consistent results
-- GPU acceleration is recommended for faster training but not required
-- The quality of predictions depends on the consistency of your manual labeling
-- The default learning rate (1e-4) is optimized for transfer learning with ViT
+4. **Repeat**: For multi-stage processing, repeat the workflow with the next stage
+   ```bash
+   python label.py --project "project_dir" --stage 2
+   python train.py --project "project_dir" --stage 2 --epochs 50
+   python cull.py --project "project_dir" --stage 2
+   ```
+   
+5. **Automatic Stage Detection**: You can also omit the stage parameter to automatically use the latest stage
+   ```bash
+   python label.py --project "project_dir"
+   python train.py --project "project_dir" --epochs 50
+   python cull.py --project "project_dir"
+   ```
 
-## CNN Module
-
-The CNN module provides deep learning functionality for image classification using PyTorch. It uses a pre-trained ResNet-18 model fine-tuned for binary classification of images.
+## Technical Details
 
 ### Model Architecture
-- Base model: ResNet-18 (pretrained on ImageNet)
-- Modified for binary classification (2 output classes)
+- Base model: Google's Vision Transformer (ViT) pretrained on ImageNet
+- Modified with a classification head for binary classification (keep/cull)
 - Input size: 224x224 RGB images
-- Output: Binary classification (cull/keep)
+- Output: Binary classification (0=keep, 1=cull)
 
 ### Dataset
 The `IMLCullDataset` class handles the image dataset:
 - Reads image paths and labels from a CSV file
 - Automatically resizes images to 224x224
 - Applies standard ImageNet normalization
-- Labels are mapped as: "cull": 0, "keep": 1
+- Labels are mapped as: "keep": 0, "cull": 1
 
-### Training Script
-The training script (`cnn/train.py`) provides the following features:
+### Important Note
 
-```bash
-python -m cnn.train --input <data_dir> [options]
-```
-
-Options:
-- `--input`: Root directory containing the source folder with images (required)
-- `--source`: Name of the source directory containing images (default: "src")
-- `--batch_size`: Batch size for training (default: 32)
-- `--epochs`: Number of training epochs (default: 10)
-- `--lr`: Learning rate (default: 1e-4)
-- `--patience`: Number of epochs to wait before early stopping (default: 3)
-
-Features:
-- Uses Adam optimizer
-- Cross-entropy loss for classification
-- Early stopping based on validation accuracy
-- Saves best model weights to `cull_model.pth`
-- Saves training metadata to `cull_model.json`
-- Automatic train/validation split (80/20)
-- GPU support when available
-
-### Model Output
-The training process saves two files:
-1. `cull_model.pth`: The best model weights based on validation accuracy
-2. `cull_model.json`: Training metadata including:
-   - Base model name
-   - Number of epochs trained
-   - Final validation accuracy
-   - Learning rate
-   - Batch size
+In this project, "culling" refers to the process of selecting images to **remove**, while "keeping" refers to images that should be **preserved**. The model predicts 0 for images to keep and 1 for images to cull. When the culling process runs, only images predicted as "keep" (prediction=0) are copied to the next stage directory.

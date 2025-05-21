@@ -2,6 +2,7 @@ import os
 import csv
 import random
 from flask import Flask, render_template_string, request, redirect, url_for
+from utils import find_latest_stage
 
 app = Flask(__name__)
 
@@ -12,6 +13,37 @@ template = """
   <head>
     <title>IML Cull Labeler</title>
     <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      .title {
+        font-size: 2.5em;
+        margin-bottom: 0;
+      }
+      .subtitle {
+        color: #777;
+        font-size: 1.2em;
+        margin-top: 5px;
+      }
+      .main-content {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+      }
+      .image-section {
+        flex: 1;
+        min-width: 400px;
+      }
+      .controls-section {
+        flex: 1;
+        min-width: 300px;
+      }
       .instruction {
         background-color: #f0f0f0;
         padding: 10px;
@@ -25,7 +57,6 @@ template = """
         border-radius: 5px;
         display: flex;
         justify-content: space-between;
-        max-width: 600px;
       }
       .stat-item {
         text-align: center;
@@ -35,52 +66,102 @@ template = """
         font-size: 1.5em;
         font-weight: bold;
       }
+      .image-container {
+        text-align: center;
+      }
       .buttons {
         margin-top: 15px;
       }
       button {
         margin-right: 5px;
-        padding: 8px 12px;
+        margin-bottom: 5px;
+        padding: 10px 15px;
+        cursor: pointer;
+      }
+      .nav-buttons button {
+        background-color: #f0f0f0;
+      }
+      .action-buttons button {
+        font-weight: bold;
+      }
+      .action-buttons button[value="keep"] {
+        background-color: #d4edda;
+        color: #155724;
+      }
+      .action-buttons button[value="cull"] {
+        background-color: #f8d7da;
+        color: #721c24;
+      }
+      .action-buttons button[value="remove"] {
+        background-color: #fff3cd;
+        color: #856404;
       }
     </style>
+    <script>
+      // Add keyboard shortcuts
+      document.addEventListener('keydown', function(event) {
+        // 'R' key for randomizing image
+        if (event.key.toLowerCase() === 'r') {
+          // Find the random button and click it
+          const randomButton = document.querySelector('button[value="random"]');
+          if (randomButton) {
+            randomButton.click();
+          }
+        }
+      });
+    </script>
   </head>
   <body>
-    <div class="instruction">
-      <p><strong>Note:</strong> You don't need to label all images. You can navigate through images and only label the ones you want.</p>
+    <div class="header">
+      <h1 class="title">IML Cull</h1>
+      <p class="subtitle">royokello</p>
     </div>
     
-    <div class="stats">
-      <div class="stat-item">
-        <div class="stat-count">{{ stats.keep }}</div>
-        <div>Keep</div>
+    <div class="main-content">
+      <div class="image-section">
+        <div class="image-container">
+          <h2>Image {{ index+1 }} of {{ total }}</h2>
+          <img src="{{ image_url }}" alt="Image" style="max-height:500px; border: 3px solid black;">
+        </div>
       </div>
-      <div class="stat-item">
-        <div class="stat-count">{{ stats.cull }}</div>
-        <div>Cull</div>
+      
+      <div class="controls-section">
+        
+        <div class="stats">
+          <div class="stat-item">
+            <div class="stat-count">{{ stats.keep }}</div>
+            <div>Keep</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-count">{{ stats.cull }}</div>
+            <div>Cull</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-count">{{ stats.unlabeled }}</div>
+            <div>Unlabeled</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-count">{{ stats.total }}</div>
+            <div>Total</div>
+          </div>
+        </div>
+        
+        <p>Current label: <strong>{{ label if label else "None" }}</strong></p>
+        
+        <form method="post">
+          <div class="buttons nav-buttons">
+            <button name="action" value="prev">← Previous</button>
+            <button name="action" value="next">Next →</button>
+            <button name="action" value="random">Random</button>
+          </div>
+          
+          <div class="buttons action-buttons">
+            <button name="action" value="keep">KEEP</button>
+            <button name="action" value="cull">CULL</button>
+            <button name="action" value="remove">Remove Label</button>
+          </div>
+        </form>
       </div>
-      <div class="stat-item">
-        <div class="stat-count">{{ stats.unlabeled }}</div>
-        <div>Unlabeled</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-count">{{ stats.total }}</div>
-        <div>Total</div>
-      </div>
-    </div>
-    
-    <h1>Image {{ index+1 }} of {{ total }}</h1>
-    <img src="{{ image_url }}" alt="Image" style="max-height:384px;"><br><br>
-    <p>Current label: <strong>{{ label if label else "None" }}</strong></p>
-    
-    <div class="buttons">
-      <form method="post">
-        <button name="action" value="prev">Prev</button>
-        <button name="action" value="next">Next</button>
-        <button name="action" value="random">Random</button>
-        <button name="action" value="cull">Cull</button>
-        <button name="action" value="keep">Keep</button>
-        <button name="action" value="remove">Remove Label</button>
-      </form>
     </div>
   </body>
 </html>
@@ -88,18 +169,34 @@ template = """
 
 # Global state variables.
 root_dir = None
-src_dir_name = 'src'  # Default source directory name
+src_dir_name = None
+stage_number = None
 labels = {}    # {image_name: "cull" or "keep" or None}
 images = []    # list of image filenames
 current_index = 0
 
-def load_data(root, source='src'):
-    global root_dir, src_dir_name, images, labels, current_index
-    root_dir = root
-    src_dir_name = source
+def load_data(project, stage=None):
+    global root_dir, src_dir_name, images, labels, current_index, stage_number
+    root_dir = project
+    
+    # If stage is not provided, try to find the latest stage
+    if stage is None:
+        try:
+            stage_number = find_latest_stage(project)
+        except ValueError as e:
+            raise ValueError(f"No stage specified and {str(e)}")
+    else:
+        stage_number = stage
+    
+    src_dir_name = f"stage_{stage_number}"
     src_dir = os.path.join(root_dir, src_dir_name)
+    
+    if not os.path.exists(src_dir):
+        raise ValueError(f"Stage directory {src_dir_name} does not exist in {root_dir}")
+    
     images = sorted(os.listdir(src_dir))
-    csv_path = os.path.join(root_dir, 'cull_labels.csv')
+    csv_path = os.path.join(root_dir, f"stage_{stage_number}_cull_labels.csv")
+    
     if os.path.exists(csv_path):
         with open(csv_path, newline='') as csvfile:
             reader = csv.DictReader(csvfile)
@@ -108,7 +205,7 @@ def load_data(root, source='src'):
     current_index = 0
 
 def save_labels():
-    csv_path = os.path.join(root_dir, 'cull_labels.csv')
+    csv_path = os.path.join(root_dir, f"stage_{stage_number}_cull_labels.csv")
     with open(csv_path, 'w', newline='') as csvfile:
         fieldnames = ['image_name', 'label']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -186,15 +283,15 @@ def index():
                                  label=current_label,
                                  stats=stats)
 
-def run_label_app(root, source='src'):
-    load_data(root, source)
-    app.static_folder = os.path.join(root, source)
+def run_label_app(project, stage=None):
+    load_data(project, stage)
+    app.static_folder = os.path.join(project, src_dir_name)
     app.run(debug=True)
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Run the image labeling interface')
-    parser.add_argument('--input', required=True, help='Root directory containing the source folder with images')
-    parser.add_argument('--source', default='src', help='Name of the source directory containing images (default: src)')
+    parser.add_argument('--project', required=True, help='Root directory of the project containing stage folders with images')
+    parser.add_argument('--stage', type=int, help='Stage number to label (if not provided, will use the latest stage)')
     args = parser.parse_args()
-    run_label_app(args.input, args.source)
+    run_label_app(args.project, args.stage)
