@@ -24,7 +24,7 @@ class IMLCullDataset(Dataset):
         # Set up image transforms (ViT model expects 224x224 images)
         # Using ImageNet normalization statistics since the model was pre-trained on ImageNet
         self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            transforms.Resize((384, 384)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
@@ -38,10 +38,28 @@ class IMLCullDataset(Dataset):
             
         with open(label_file_path, newline='') as csvfile:
             reader = csv.DictReader(csvfile)
-            # Map "cull" to 1, "keep" to 0.
+            # The 'label' column should now directly contain 0 (Keep) or 1 (Cull).
+            # The 'tag' column is ignored for training purposes by this Dataset class.
             for row in reader:
-                self.labels[row['image_name']] = 1 if row['label'].lower() == 'cull' else 0
-        self.images = list(self.labels.keys())
+                try:
+                    # Handle the image path from CSV - this can be absolute, relative, or just a filename
+                    image_path_from_csv = row['image_path']
+                    
+                    # We'll use this as our key in self.labels
+                    image_key = image_path_from_csv # Store the original value from CSV
+                    label_str = row['label']
+                    label_value = int(label_str)
+                    if label_value not in [0, 1]:
+                        print(f"Warning: Invalid label value '{label_value}' for image '{image_path_from_csv}' in {label_file_path}. Expected 0 or 1. Skipping.")
+                        continue
+                    self.labels[image_key] = label_value
+                except ValueError:
+                    print(f"Warning: Non-integer label value '{label_str}' for image '{image_path_from_csv}' in {label_file_path}. Skipping.")
+                    continue
+                except KeyError as e:
+                    print(f"Warning: CSV row missing expected key ({e}) in {label_file_path}. Row: {row}. Skipping.")
+                    continue
+        self.images = list(self.labels.keys()) # This will now be a list of image_paths
     
     def __len__(self):
         """Return the number of images in the dataset"""
@@ -57,12 +75,23 @@ class IMLCullDataset(Dataset):
         Returns:
             tuple: (pixel_values, label, img_path)
         """
-        img_name = self.images[idx]
-        img_path = os.path.join(self.image_dir, img_name)
+        # Get the image path from our stored list
+        img_path_from_csv = self.images[idx]
+        
+        # Handle the path correctly - if it's a relative path or just a filename
+        # join it with image_dir, otherwise use it as is if it's an absolute path
+        if os.path.isabs(img_path_from_csv) and os.path.exists(img_path_from_csv):
+            # If it's an absolute path and it exists, use it directly
+            img_path = img_path_from_csv
+        else:
+            # Otherwise, treat it as relative to image_dir
+            # First check if it's just a basename or a relative path
+            img_basename = os.path.basename(img_path_from_csv)
+            img_path = os.path.join(self.image_dir, img_basename)
         image = Image.open(img_path).convert("RGB")
         
         # Apply transforms to the image
         pixel_values = self.transform(image)
         
-        label = self.labels[img_name]
+        label = self.labels[self.images[idx]] # Use the exact same key from our images list
         return pixel_values, label, img_path  # Return image path for identification

@@ -10,7 +10,7 @@ class IMLCullModel(nn.Module):
     Uses a pre-trained Vision Transformer as the backbone and adds a classification head
     to predict whether an image should be kept (0) or culled (1).
     """
-    def __init__(self, pretrained_model_name='google/vit-base-patch16-224'):
+    def __init__(self, pretrained_model_name='google/vit-base-patch16-384'):
         super(IMLCullModel, self).__init__()
         # Load pre-trained ViT model
         self.vit = ViTModel.from_pretrained(pretrained_model_name)
@@ -54,7 +54,7 @@ class IMLCullModel(nn.Module):
         # Set up image transforms (same as in dataset.py)
         # Using ImageNet normalization statistics since the model was pre-trained on ImageNet
         transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            transforms.Resize((384, 384)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])

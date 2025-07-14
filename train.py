@@ -8,31 +8,19 @@ from utils import find_latest_stage
 from model import IMLCullModel
 from dataset import IMLCullDataset
 
-def train_epoch(model: torch.nn.Module, 
-             dataloader: torch.utils.data.DataLoader, 
-             criterion: torch.nn.Module, 
-             optimizer: torch.optim.Optimizer, 
-             dataset_size: int, 
-             device: str) -> float:
-    """
-    Train the model for one epoch.
-    
-    Args:
-        model: The neural network model
-        dataloader: DataLoader for the training dataset
-        criterion: Loss function
-        optimizer: Optimizer for updating model weights
-        dataset_size: Size of the training dataset
-        device: Device to use for training (cpu or cuda)
-        
-    Returns:
-        Average training loss for the epoch
-    """
+def train_epoch(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    criterion: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    dataset_size: int,
+    device: str
+) -> float:
     model.train()
     running_loss = 0.0
     
     for batch in dataloader:
-        pixel_values, labels = batch[0], batch[1]  # Unpack the batch (ignore image paths)
+        pixel_values, labels = batch[0], batch[1]
         pixel_values = pixel_values.to(device)
         labels = labels.to(device)
         
@@ -46,24 +34,13 @@ def train_epoch(model: torch.nn.Module,
         
     return running_loss / dataset_size
 
-def validate_epoch(model: torch.nn.Module, 
-                 dataloader: torch.utils.data.DataLoader, 
-                 criterion: torch.nn.Module, 
-                 dataset_size: int, 
-                 device: str) -> Tuple[float, float]:
-    """
-    Validate the model for one epoch.
-    
-    Args:
-        model: The neural network model
-        dataloader: DataLoader for the validation dataset
-        criterion: Loss function
-        dataset_size: Size of the validation dataset
-        device: Device to use for validation (cpu or cuda)
-        
-    Returns:
-        Tuple of (average validation loss, accuracy) for the epoch
-    """
+def validate_epoch(
+    model: torch.nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    criterion: torch.nn.Module,
+    dataset_size: int,
+    device: str
+) -> Tuple[float, float]:
     model.eval()
     running_loss = 0.0
     correct = 0
@@ -71,14 +48,13 @@ def validate_epoch(model: torch.nn.Module,
     
     with torch.no_grad():
         for batch in dataloader:
-            pixel_values, labels = batch[0], batch[1]  # Unpack the batch (ignore image paths)
+            pixel_values, labels = batch[0], batch[1]
             pixel_values = pixel_values.to(device)
             labels = labels.to(device)
             logits = model(pixel_values=pixel_values)
             loss = criterion(logits, labels)
             running_loss += loss.item() * pixel_values.size(0)
             
-            # Calculate accuracy
             _, predicted = torch.max(logits.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
@@ -86,30 +62,18 @@ def validate_epoch(model: torch.nn.Module,
     accuracy = correct / total
     return running_loss / dataset_size, accuracy
 
-def train_model(project_dir: str, 
-             num_epochs: int, 
-             batch_size: int = 64, 
-             learning_rate: float = 1e-3, 
-             patience: int = 16, 
-             validation_split: float = 0.25, 
-             device: str = "cpu", 
-             stage: Optional[int] = None) -> Optional[torch.nn.Module]:
-    """
-    Train a model using labeled data from the project directory.
-    
-    Args:
-        project_dir: Path to the project directory containing stage folders
-        num_epochs: Number of training epochs
-        batch_size: Batch size for training
-        learning_rate: Learning rate for optimizer
-        patience: Early stopping patience
-        validation_split: Fraction of data to use for validation
-        device: Device to use for training (cpu or cuda)
-        stage: Specific stage to use for training (if None, will use the latest stage)
-    """
-    # Detect the stage before creating the dataset
+def train_model(
+    project_dir: str,
+    num_epochs: int,
+    batch_size: int = 64,
+    learning_rate: float = 1e-3,
+    patience: int = 16,
+    validation_split: float = 0.25,
+    device: str = "cpu",
+    stage: Optional[int] = None,
+    resume: bool = False
+) -> Optional[torch.nn.Module]:
     try:
-        # If stage is not provided, try to find the latest stage
         if stage is None:
             try:
                 stage = find_latest_stage(project_dir)
@@ -164,8 +128,30 @@ def train_model(project_dir: str,
     best_val_accuracy = 0.0
     
     # Initialize model
-    model = IMLCullModel(pretrained_model_name='google/vit-base-patch16-224')
-    model.to(device)
+    model_initialized_from_scratch = True
+    if resume:
+        if stage > 1: # Check if there's a previous stage to load from
+            previous_stage_number = stage - 1
+            previous_model_path = os.path.join(project_dir, f"stage_{previous_stage_number}_cull_model.pth")
+            if os.path.exists(previous_model_path):
+                print(f"Attempting to load model weights from previous stage: {previous_model_path}")
+                try:
+                    model = IMLCullModel() # Initialize model structure
+                    model.load_state_dict(torch.load(previous_model_path, map_location=device))
+                    model.to(device)
+                    print(f"Successfully loaded model weights from {previous_model_path}.")
+                    model_initialized_from_scratch = False
+                except Exception as e:
+                    print(f"Error loading weights from {previous_model_path}: {e}. Initializing with default pre-trained weights.")
+            else:
+                print(f"Previous stage model {previous_model_path} not found. Initializing with default pre-trained weights.")
+        else:
+            print(f"Current stage is {stage}. No previous stage model to load. Initializing with default pre-trained weights.")
+    
+    if model_initialized_from_scratch:
+        print("Initializing model with default pre-trained weights (google/vit-base-patch16-384).")
+        model = IMLCullModel(pretrained_model_name='google/vit-base-patch16-384')
+        model.to(device)
     
     # Log dataset statistics
     total_size = len(dataset)
@@ -196,14 +182,17 @@ def train_model(project_dir: str,
         with open(epoch_log_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([epoch + 1, train_loss, val_loss, val_accuracy])
-        
-        # Check for improvement in validation accuracy.
+
         if val_accuracy > best_val_accuracy:
+            if abs(val_loss - train_loss) > (val_loss/2):
+                epochs_no_improve += 1
+                continue
+
             best_val_accuracy = val_accuracy
             epochs_no_improve = 0
-            # Save model
             torch.save(model.state_dict(), model_file)
-            print(f"Validation accuracy improved to {best_val_accuracy:.4f}. Model saved to {model_file}.")
+            print("Saving ...")
+
         else:
             epochs_no_improve += 1
             print(f"No improvement in validation accuracy for {epochs_no_improve} epoch(s).")
@@ -216,15 +205,13 @@ def train_model(project_dir: str,
 
 if __name__ == '__main__':
     import argparse
-    
-    # Set up command line argument parsing
-    parser = argparse.ArgumentParser(description='Train a ViT model for image culling across all labeled projects')
-    parser.add_argument('--project', required=True, type=str, help='Path to the project directory containing stage folders')
-    parser.add_argument('--stage', type=int, help='Stage number to use for training (if not provided, will use the latest stage)')
-    parser.add_argument('--epochs', type=int, default=256, help='Number of epochs to train for (default: 256)')
-    parser.add_argument('--batch-size', type=int, default=32, help='Batch size for training (default: 64)')
-    parser.add_argument('--learning-rate', type=float, default=1e-4, help='Learning rate (default: 0.001)')
-    parser.add_argument('--patience', type=int, default=8, help='Early stopping patience (default: 16)')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--project', required=True, type=str)
+    parser.add_argument('--stage', type=int)
+    parser.add_argument('--epochs', type=int, default=256)
+    parser.add_argument('--batch-size', type=int, default=12)
+    parser.add_argument('--learning-rate', type=float, default=1e-4)
+    parser.add_argument('--patience', type=int, default=4)
     
     args = parser.parse_args()
     
@@ -238,5 +225,5 @@ if __name__ == '__main__':
         learning_rate=args.learning_rate,
         patience=args.patience,
         device=device,
-        stage=args.stage
+        stage=args.stage,
     )

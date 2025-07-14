@@ -85,7 +85,7 @@ def perform_culling(project_dir, stage=None, batch_size=64):
     
     # Create the image transform (same as in the model.py and dataset.py)
     transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((384, 384)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
@@ -157,7 +157,7 @@ if __name__ == '__main__':
                         help='Path to the project directory containing stage folders')
     parser.add_argument('--stage', type=int, default=None, 
                         help='Stage number to process (if not provided, will use the latest stage)')
-    parser.add_argument('--batch-size', type=int, default=512, 
+    parser.add_argument('--batch-size', type=int, default=128, 
                         help='Number of images to process at once (default: 512)')
     
     args = parser.parse_args()
